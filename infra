@@ -1,0 +1,251 @@
+#!/bin/bash
+
+export $(cat .env.docker-compose)
+mkdir -p ../db-$APP_ENV
+
+if [ $APP_ENV = "release" ];then
+COMPOSE=docker-compose.release.yaml
+else
+COMPOSE=docker-compose.yaml
+fi
+
+
+serviceInit () {
+    clear && echo "
+##################################################
+##   initializing counter app . . .  [$APP_ENV] ##
+##################################################
+
+starting... "
+    git clone $REPOS ../$NEW_PROJECT
+    cp -R infra .env.docker-compose docker-compose.yaml docker-compose.release.yaml infrastructure ../$NEW_PROJECT/
+    
+    cd ../$NEW_PROJECT && touch .env
+    docker-compose -f $COMPOSE run -d mysql
+    serviceBuild base-nginx;serviceBuild base-php-fpm;serviceBuild base-worker
+    sleep 60
+    serviceDown
+    composerExec init
+    sudo chmod -R 777 ./storage
+    serviceUp
+    mysqlCli init
+    artisanExec key:generate
+    artisanExec migrate
+    
+}
+
+serviceInitRelease () {
+    clear && echo "
+##################################################
+##   initializing counter app . . .  [$APP_ENV] ##
+##################################################
+
+starting... "
+    cp -R ../$(pwd | sed 's#.*/##') ../$NEW_PROJECT
+
+    cd ../$NEW_PROJECT && touch .env
+    docker-compose -f $COMPOSE run -d mysql
+    serviceBuild base-nginx;serviceBuild base-php-fpm;serviceBuild base-worker
+    sleep 60
+    serviceDown
+    serviceUpRelease
+    mysqlCli init
+    artisanExec key:generate
+    artisanExec migrate
+    
+}
+
+serviceBuild () {
+    docker-compose -f $COMPOSE build $1 $2 $3
+}
+
+serviceDown () {
+    docker-compose down
+}
+
+serviceExec () {
+    if (( $# != 1 )); then
+    echo "
+    Usage:
+    infra sh [SERVICE]
+    "
+    exit 1
+    fi
+    docker-compose exec $1 sh
+}
+
+serviceLogs () {
+    docker-compose logs -f $1 $2
+}
+
+serviceRestart () {
+    docker-compose restart $1 $2 $3 $4 $5 $6 $7 $8
+}
+
+serviceTest () {
+    docker-compose exec worker sh -c "./vendor/bin/phpunit"
+}
+
+serviceUp () {
+    docker-compose up -d nginx
+}
+
+serviceUpRelease () {
+    docker-compose -f $COMPOSE up -d nginx
+}
+
+artisanExec () {
+    if (( $# != 1 )); then
+    echo "
+    Usage:
+    infra artisan [command]
+    "
+    exit 1
+    fi
+    docker-compose exec worker sh -c "php artisan $1"
+}
+
+composerExec () {
+    if (( $# != 1 )); then
+    echo "
+    Usage:
+    infra composer [command]
+    "
+    exit 1
+    fi
+
+    if [[ $1 = "dump-autoload" ]] ;then
+    docker-compose run composer sh -c "composer dump-autoload"
+    else
+    docker-compose run composer sh -c "composer install"
+    docker-compose run composer sh -c "composer dump-autoload"
+    docker-compose run composer sh -c "chown -R ${DOCKER_COMPOSE_USER}:${DOCKER_COMPOSE_USER_GROUP} /app/vendor"
+    fi
+}
+
+mysqlCli () {
+   if [[ $1 = "init" ]] ;then
+    docker-compose exec mysql mysql -e "create database IF NOT EXISTS counter"
+    docker-compose exec mysql mysql -e "CREATE USER IF NOT EXISTS 'counter_app'@'%' IDENTIFIED BY 'secret'"
+    docker-compose exec mysql mysql -e "GRANT ALL ON *.* TO 'counter_app'@'%'"
+    docker-compose exec mysql mysql -e "flush privileges"
+   else
+   docker-compose exec mysql mysql 
+   fi 
+}
+
+redisCli () {
+    docker-compose exec redis redis-cli
+}
+
+helpMe () {
+echo "
+Counter App Dev Tools $(echo "[$(cat .env.docker-compose |grep APP_ENV |sed 's/APP_ENV=//g')]")
+
+Usage:
+   infra command [arguments]
+
+Available commands:
+   init                  Initialize the infrastructure for the first time
+   up                    Start the infrastructure
+   down                  Stop infrastructure
+   build [services?]     Build image for all or given services
+   logs [services?]      View logs for all or given services
+   restart [services?]   Restart all or given services
+   sh [service]          Exec sh in the given service
+   artisan [arguments?]  Exec artisan command in the worker service
+   test [arguments?]     Run phpunit in the worker service
+   composer [arguments?] Run composer in the composer service
+   mysql                 Run mysql cli as root in the mysql service
+   redis                 Run redis cli in the redis service
+   help                  Print all the available commands
+   release               Use release image
+   local                 Use local image
+"
+}
+
+cleanTestProject () {
+  cd ../$NEW_PROJECT && ./infra down && sudo rm -rf ../db-$APP_ENV ../$NEW_PROJECT
+}
+
+
+case "$1" in
+
+  (init) 
+    if [ $APP_ENV = "release" ];then
+    serviceInitRelease
+    else
+    serviceInit
+    fi
+    exit 0
+    ;;
+  (up)
+    if [ $APP_ENV = "release" ];then
+    serviceUpRelease
+    else
+    serviceUp
+    fi
+    exit 0
+    ;;
+  (down)
+    serviceDown
+    exit 0
+    ;;
+  (build) 
+    serviceBuild $2 $3 $4
+    exit 0
+    ;;
+  (logs)
+    serviceLogs $2 $3 $4 $5
+    exit 0
+    ;;
+  (restart)
+    serviceRestart $2 $3 $4 $5 $6
+    exit 0
+    ;;
+  (sh) 
+    serviceExec $2
+    exit 0
+    ;;
+  (artisan)
+    alias 
+    artisanExec $2
+    artisanExec db:seed
+    exit 0
+    ;;
+  (test)
+    serviceTest
+    exit 0
+    ;;
+  (composer) 
+    composerExec $2
+    exit 0
+    ;;
+  (mysql)
+    mysqlCli $2 $3 $4 $5 $6
+    exit 0
+    ;;
+  (redis)
+    redisCli $2 $3 $4
+    exit 0
+    ;;
+  (release)
+    sed -i '/APP_ENV/d' .env.docker-compose
+    sed -i '1 i APP_ENV=release' .env.docker-compose
+    serviceUpRelease
+    exit 0
+    ;;
+  (local)
+    sed -i '/APP_ENV/d' .env.docker-compose
+    sed -i '1 i APP_ENV=local' .env.docker-compose
+    serviceUp
+    exit 0
+    ;;
+  (clean)
+  cleanTestProject
+  ;;
+  (*)
+    helpMe $2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,19 @@
+FROM composer:2.0.11 AS init
+WORKDIR /app
+COPY . .
+RUN composer install -vvv --no-dev --ignore-platform-reqs --no-scripts
+
+FROM jakmall/recruitment/cloud-engineer/counter/php-fpm AS php-fpm-release
+WORKDIR /var/www/html
+
+COPY . .
+COPY --from=init /app/vendor ./vendor
+COPY --from=init /usr/bin/composer /usr/bin/composer
+RUN mkdir -p storage/framework/views && chmod 777 -R storage bootstrap/cache \
+    && touch .env \
+    && rm -rf infrastructure \
+    && composer dump-autoload \
+    && php artisan route:cache \
+    && php artisan view:cache
+
+
