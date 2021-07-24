@@ -1,11 +1,13 @@
 #!/bin/bash
 
-# Check docker-compose bin
-if [ -z $(which docker-compose | cut -d '-' -f 2) ];then
+# Check docker-compose bin & Env docker-compose File
+if [ -z $(which docker-compose | cut -d '-' -f 2) ] || [ -z $(ls .env.docker-compose) ];then
 echo " 
 
 
-    NOTE: Please Install docker-compose first to using this script...
+    NOTES:  - Please Install docker-compose [$(printf '\u2714\n') mandatory]
+            - Set .env.docker-compose ... [$(printf '\u2714\n') mandatory]
+
         #REF:  https://docs.docker.com/compose/install/
         
         "
@@ -13,7 +15,7 @@ exit 1
 fi
 
 export $(cat .env.docker-compose)
-mkdir -p ../db-$APP_ENV
+
 
 if [ $APP_ENV = "release" ];then
 COMPOSE=docker-compose.release.yaml
@@ -31,7 +33,8 @@ serviceInit () {
 starting... "
     git clone $REPOS ../$NEW_PROJECT
     cp -R infra .env.docker-compose docker-compose.yaml docker-compose.release.yaml infrastructure ../$NEW_PROJECT/
-    
+    mkdir -p ../db-$APP_ENV
+
     cd ../$NEW_PROJECT && touch .env
     docker-compose -f $COMPOSE run -d mysql
     serviceBuild base-nginx;serviceBuild base-php-fpm;serviceBuild base-worker
@@ -43,6 +46,7 @@ starting... "
     mysqlCli init
     artisanExec key:generate
     artisanExec migrate
+    cd ../$NEW_PROJECT/ && exec bash
     
 }
 
@@ -54,6 +58,7 @@ serviceInitRelease () {
 
 starting... "
     cp -R ../$(pwd | sed 's#.*/##') ../$NEW_PROJECT
+    mkdir -p ../db-$APP_ENV
 
     cd ../$NEW_PROJECT && touch .env
     docker-compose -f $COMPOSE run -d mysql
@@ -64,6 +69,7 @@ starting... "
     mysqlCli init
     artisanExec key:generate
     artisanExec migrate
+    cd ../$NEW_PROJECT/ && exec bash
     
 }
 
