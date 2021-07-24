@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Check docker-compose bin
+if [ -z $(which docker-compose | cut -d '-' -f 2) ];then
+echo " 
+
+
+    NOTE: Please Install docker-compose first to using this script...
+        #REF:  https://docs.docker.com/compose/install/
+        
+        "
+exit 1
+fi
+
 export $(cat .env.docker-compose)
 mkdir -p ../db-$APP_ENV
 
@@ -168,6 +180,10 @@ cleanTestProject () {
   cd ../$NEW_PROJECT && ./infra down && sudo rm -rf ../db-$APP_ENV ../$NEW_PROJECT
 }
 
+pS () {
+  docker-compose -f $COMPOSE ps
+}
+
 
 case "$1" in
 
@@ -242,7 +258,10 @@ case "$1" in
     exit 0
     ;;
   (clean)
-  cleanTestProject
+    cleanTestProject
+  ;;
+  (ps)
+    pS
   ;;
   (*)
     helpMe $2
